@@ -2,8 +2,14 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/garmin.py",
+      "src": "api/index.py",
       "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "api/index.py"
     }
   ]
 }

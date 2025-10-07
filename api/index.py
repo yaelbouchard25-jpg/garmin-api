@@ -11,7 +11,20 @@ class handler(BaseHTTPRequestHandler):
             # Récupérer les identifiants
             email = os.environ.get('GARMIN_EMAIL')
             password = os.environ.get('GARMIN_PASSWORD')
-            
+
+            # Vérifier que les identifiants existent
+            if not email or not password:
+                self.send_response(400)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                response = {
+                    "error": "Identifiants Garmin non configurés",
+                    "email_length": len(email) if email else 0,
+                    "password_length": len(password) if password else 0,
+                    "email_starts_with": email[:3] if email else "None"
+                }
+                self.wfile.write(json.dumps(response).encode())
+                return
             # Vérifier que les identifiants existent
             if not email or not password:
                 self.send_response(400)

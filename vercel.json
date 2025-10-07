@@ -1,7 +1,9 @@
 {
-  "functions": {
-    "api/garmin.py": {
-      "runtime": "python3.9"
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/garmin.py",
+      "use": "@vercel/python"
     }
-  }
+  ]
 }

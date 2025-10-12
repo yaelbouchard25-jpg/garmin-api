@@ -42,83 +42,88 @@ class handler(BaseHTTPRequestHandler):
             client = Garmin(email, password)
             client.login()
             
-            # Fonction helper pour gérer les erreurs
-            def safe_get(func, *args, default=None):
+            # Fonction améliorée pour gérer les erreurs ET les méthodes manquantes
+            def safe_get(method_name, *args, default=None):
                 try:
-                    return func(*args)
-                except:
+                    # Vérifier si la méthode existe
+                    if hasattr(client, method_name):
+                        method = getattr(client, method_name)
+                        return method(*args)
+                    else:
+                        return default
+                except Exception:
                     return default
             
             # ==================== RÉCUPÉRATION DE TOUTES LES DONNÉES ====================
             
-            # 1. Statistiques de base
-            stats = safe_get(client.get_stats, date_str, {})
+            # 1. Statistiques de base (toujours disponibles)
+            stats = safe_get('get_stats', date_str, {})
             
             # 2. Sommeil
-            sleep_data = safe_get(client.get_sleep_data, date_str, {})
+            sleep_data = safe_get('get_sleep_data', date_str, {})
             
-            # 3. Fréquence cardiaque
-            heart_rates = safe_get(client.get_heart_rates, date_str, {})
+            # 3. Fréquence cardiaque détaillée
+            heart_rates = safe_get('get_heart_rates', date_str, {})
             
             # 4. Activités du jour
-            activities = safe_get(client.get_activities_by_date, date_str, date_str, [])
+            activities = safe_get('get_activities_by_date', date_str, date_str, [])
             
             # 5. Stress détaillé
-            stress_data = safe_get(client.get_stress_data, date_str, {})
+            stress_data = safe_get('get_stress_data', date_str, {})
             
             # 6. Body Battery
-            body_battery = safe_get(client.get_body_battery, date_str, date_str, [])
+            body_battery = safe_get('get_body_battery', date_str, date_str, [])
             
             # 7. Respiration
-            respiration = safe_get(client.get_respiration_data, date_str, {})
+            respiration = safe_get('get_respiration_data', date_str, {})
             
             # 8. SpO2
-            spo2 = safe_get(client.get_spo2_data, date_str, {})
+            spo2 = safe_get('get_spo2_data', date_str, {})
             
             # 9. HRV (Variabilité fréquence cardiaque)
-            hrv = safe_get(client.get_hrv_data, date_str, {})
+            hrv = safe_get('get_hrv_data', date_str, {})
             
             # 10. Training Readiness
-            training_readiness = safe_get(client.get_training_readiness, date_str, {})
+            training_readiness = safe_get('get_training_readiness', date_str, {})
             
             # 11. Training Status
-            training_status = safe_get(client.get_training_status, date_str, {})
+            training_status = safe_get('get_training_status', date_str, {})
             
-            # 12. Max Metrics (VO2 Max, Fitness Age)
-            max_metrics = safe_get(client.get_max_metrics, date_str, {})
+            # 12. Max Metrics (VO2 Max, etc.)
+            max_metrics = safe_get('get_max_metrics', date_str, {})
             
             # 13. Hydratation
-            hydration = safe_get(client.get_hydration_data, date_str, {})
+            hydration = safe_get('get_hydration_data', date_str, {})
             
             # 14. Poids
-            weight = safe_get(client.get_weigh_ins, date_str, {})
+            weight = safe_get('get_weigh_ins', date_str, {})
             
             # 15. Composition corporelle
-            body_comp = safe_get(client.get_body_composition, date_str, date_str, {})
+            body_comp = safe_get('get_body_composition', date_str, date_str, {})
             
             # 16. Tension artérielle
-            blood_pressure = safe_get(client.get_blood_pressure, date_str, date_str, [])
+            blood_pressure = safe_get('get_blood_pressure', date_str, date_str, [])
             
             # 17. Hill Score
-            hill_score = safe_get(client.get_hill_score, date_str, date_str, {})
+            hill_score = safe_get('get_hill_score', date_str, date_str, {})
             
             # 18. Endurance Score
-            endurance_score = safe_get(client.get_endurance_score, date_str, date_str, {})
+            endurance_score = safe_get('get_endurance_score', date_str, date_str, {})
             
             # 19. Race Predictions
-            race_predictions = safe_get(client.get_race_predictions, {})
+            race_predictions = safe_get('get_race_predictions', {})
             
-            # 20. Fitness Age
-            fitness_age = safe_get(client.get_fitness_age, date_str, {})
+            # 20. Données solaires
+            solar_data = safe_get('get_solar_data', {})
             
-            # 21. Wellness Events
-            wellness_events = safe_get(client.get_daily_wellness_events, date_str, [])
+            # 21. Objectifs
+            active_goals = safe_get('get_active_goals', [])
             
-            # 22. Données solaires
-            solar_data = safe_get(client.get_solar_data, {})
+            # 22. Wellness Events
+            wellness_events = safe_get('get_daily_wellness_events', date_str, [])
             
-            # 23. Objectifs
-            active_goals = safe_get(client.get_active_goals, [])
+            # 23. Fitness Age (nom corrigé)
+            fitness_age_data = safe_get('get_fitnessage_data', date_str, {})
             
             # ==================== CONSTRUCTION DE LA RÉPONSE ====================
             
@@ -198,7 +203,7 @@ class handler(BaseHTTPRequestHandler):
                     "readiness_level": training_readiness.get("level") if training_readiness else None,
                     "training_status": training_status.get("trainingStatus") if training_status else None,
                     "vo2_max": max_metrics.get("vo2MaxValue") if max_metrics else 0,
-                    "fitness_age": max_metrics.get("fitnessAge") if max_metrics else 0,
+                    "fitness_age": fitness_age_data.get("fitnessAge") if fitness_age_data else 0,
                     "hill_score": hill_score.get("hillScore") if hill_score else 0,
                     "endurance_score": endurance_score.get("enduranceScore") if endurance_score else 0,
                 },
@@ -215,7 +220,7 @@ class handler(BaseHTTPRequestHandler):
                             "calories": act.get("calories", 0),
                             "avg_hr": act.get("averageHR", 0),
                             "max_hr": act.get("maxHR", 0),
-                            "avg_speed": round(act.get("averageSpeed", 0) * 3.6, 2),  # m/s vers km/h
+                            "avg_speed": round(act.get("averageSpeed", 0) * 3.6, 2),
                             "elevation_gain": act.get("elevationGain", 0),
                         }
                         for act in (activities[:20] if activities else [])
@@ -254,7 +259,7 @@ class handler(BaseHTTPRequestHandler):
                     "list": active_goals if active_goals else []
                 },
                 
-                # DONNÉES SOLAIRES (montres solaires)
+                # DONNÉES SOLAIRES
                 "solar": solar_data if solar_data else {},
                 
                 # WELLNESS EVENTS

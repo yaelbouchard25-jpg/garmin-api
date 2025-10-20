@@ -148,6 +148,7 @@ class handler(BaseHTTPRequestHandler):
                 return default
             
             # ==================== CONSTRUCTION DE LA RÉPONSE ====================
+
             
             data = {
                 "date": date_str,

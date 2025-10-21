@@ -24,7 +24,7 @@ class handler(BaseHTTPRequestHandler):
             parsed_url = urlparse(self.path)
             params = parse_qs(parsed_url.query)
             
-            # Mode debug
+            # MODE DEBUG - IMPORTANT
             debug_mode = 'debug' in params
             
             if 'date' in params and params['date'][0]:
@@ -74,6 +74,14 @@ class handler(BaseHTTPRequestHandler):
                     return data.get(key, default)
                 return default
             
+            # Fonction pour convertir secondes en HH:MM
+            def seconds_to_hhmm(seconds):
+                if not seconds or seconds == 0:
+                    return "0h00"
+                hours = int(seconds // 3600)
+                minutes = int((seconds % 3600) // 60)
+                return f"{hours}h{minutes:02d}"
+            
             # Fonction pour extraire valeur imbriquée
             def get_nested(data, *keys, default=0):
                 try:
@@ -107,14 +115,17 @@ class handler(BaseHTTPRequestHandler):
             blood_pressure = safe_get('get_blood_pressure', date_str, date_str)
             steps_data = safe_get('get_steps_data', date_str)
             
-            # MODE DEBUG - Retourner les données brutes
+            # ==================== MODE DEBUG ====================
             if debug_mode:
                 debug_data = {
                     "date": date_str,
+                    "message": "MODE DEBUG ACTIVÉ - Données brutes de Garmin",
                     "raw_data": {
                         "sleep_data": sleep_data,
                         "hrv": hrv,
                         "stats": stats,
+                        "training_readiness": training_readiness,
+                        "spo2": spo2
                     }
                 }
                 self.send_response(200)
@@ -122,6 +133,8 @@ class handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps(debug_data, indent=2, default=str).encode())
                 return
+            
+            # ==================== EXTRACTION DES DONNÉES ====================
             
             # Extraire les données de sommeil
             daily_sleep = {}
@@ -137,7 +150,7 @@ class handler(BaseHTTPRequestHandler):
                 if isinstance(daily_sleep, dict):
                     sleep_scores = daily_sleep.get('sleepScores', {})
             
-            # Extraire le sleep score principal
+            # Extraire le sleep score
             sleep_score = (
                 get_nested(daily_sleep, 'overallSleepScore', default=0) or
                 get_nested(sleep_scores, 'overallScore', default=0) or
@@ -206,9 +219,17 @@ class handler(BaseHTTPRequestHandler):
                     "hrv_last_night_5min": get_value(hrv, "lastNight5MinHigh", 0),
                 },
                 
-                # SOMMEIL DÉTAILLÉ
+                # SOMMEIL DÉTAILLÉ - AVEC FORMAT HEURES:MINUTES
                 "sleep": {
-                    # Durées
+                    # Durées en format HH:MM
+                    "total_time": seconds_to_hhmm(get_value(daily_sleep, "sleepTimeSeconds", 0)),
+                    "deep_sleep": seconds_to_hhmm(get_value(daily_sleep, "deepSleepSeconds", 0)),
+                    "light_sleep": seconds_to_hhmm(get_value(daily_sleep, "lightSleepSeconds", 0)),
+                    "rem_sleep": seconds_to_hhmm(get_value(daily_sleep, "remSleepSeconds", 0)),
+                    "awake_time": seconds_to_hhmm(get_value(daily_sleep, "awakeSleepSeconds", 0)),
+                    "unmeasurable_time": seconds_to_hhmm(get_value(daily_sleep, "unmeasurableSleepSeconds", 0)),
+                    
+                    # Durées en heures décimales (pour calculs)
                     "total_hours": round(get_value(daily_sleep, "sleepTimeSeconds", 0) / 3600, 2),
                     "deep_hours": round(get_value(daily_sleep, "deepSleepSeconds", 0) / 3600, 2),
                     "light_hours": round(get_value(daily_sleep, "lightSleepSeconds", 0) / 3600, 2),
@@ -235,6 +256,7 @@ class handler(BaseHTTPRequestHandler):
                     "sleep_window_confirmed": get_value(daily_sleep, "sleepWindowConfirmed", False),
                     
                     # Siestes
+                    "nap_time": seconds_to_hhmm(get_value(daily_sleep, "napTimeSeconds", 0)),
                     "nap_time_hours": round(get_value(daily_sleep, "napTimeSeconds", 0) / 3600, 2),
                     
                     # Respiration pendant le sommeil
@@ -263,6 +285,11 @@ class handler(BaseHTTPRequestHandler):
                 "stress": {
                     "avg": get_value(stats, "averageStressLevel", 0),
                     "max": get_value(stats, "maxStressLevel", 0),
+                    "rest_time": seconds_to_hhmm(get_value(stress_data, "restStressMinutes", 0) * 60),
+                    "activity_time": seconds_to_hhmm(get_value(stress_data, "activityStressMinutes", 0) * 60),
+                    "low_time": seconds_to_hhmm(get_value(stress_data, "lowStressMinutes", 0) * 60),
+                    "medium_time": seconds_to_hhmm(get_value(stress_data, "mediumStressMinutes", 0) * 60),
+                    "high_time": seconds_to_hhmm(get_value(stress_data, "highStressMinutes", 0) * 60),
                     "rest_time_minutes": get_value(stress_data, "restStressMinutes", 0),
                     "activity_time_minutes": get_value(stress_data, "activityStressMinutes", 0),
                     "low_time_minutes": get_value(stress_data, "lowStressMinutes", 0),
@@ -301,6 +328,7 @@ class handler(BaseHTTPRequestHandler):
                         {
                             "name": act.get("activityName", ""),
                             "type": act.get("activityType", {}).get("typeKey", "") if isinstance(act.get("activityType"), dict) else "",
+                            "duration": seconds_to_hhmm(act.get("duration", 0)),
                             "duration_minutes": round(act.get("duration", 0) / 60, 2),
                             "distance_km": round(act.get("distance", 0) / 1000, 2),
                             "calories": act.get("calories", 0),
@@ -371,3 +399,5 @@ class handler(BaseHTTPRequestHandler):
                 "traceback": traceback.format_exc()
             }
             self.wfile.write(json.dumps(error_response).encode())
+```
+

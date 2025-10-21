@@ -91,10 +91,31 @@ class handler(BaseHTTPRequestHandler):
             blood_pressure = safe_get('get_blood_pressure', date_str, date_str)
             steps_data = safe_get('get_steps_data', date_str)
             
-            # Extraire dailySleepDTO correctement
-            daily_sleep = sleep_data.get('dailySleepDTO', {}) if isinstance(sleep_data, dict) else {}
-            sleep_levels = sleep_data.get('sleepLevels', []) if isinstance(sleep_data, dict) else []
-            sleep_movement = sleep_data.get('sleepMovement', []) if isinstance(sleep_data, dict) else []
+            # Extraire les données de sommeil correctement
+            daily_sleep = {}
+            sleep_scores = {}
+            sleep_levels = []
+            sleep_movement = []
+            
+            if isinstance(sleep_data, dict):
+                daily_sleep = sleep_data.get('dailySleepDTO', {})
+                sleep_levels = sleep_data.get('sleepLevels', [])
+                sleep_movement = sleep_data.get('sleepMovement', [])
+                
+                # IMPORTANT : Récupérer le sleep score
+                if isinstance(daily_sleep, dict) and 'sleepScores' in daily_sleep:
+                    sleep_scores = daily_sleep.get('sleepScores', {})
+            
+            # Extraire les données HRV correctement
+            hrv_data = {}
+            hrv_status = None
+            hrv_avg = 0
+            
+            if isinstance(hrv, dict):
+                hrv_data = hrv
+                # Récupérer le statut HRV
+                hrv_status = hrv.get('status', hrv.get('hrvStatus', None))
+                hrv_avg = hrv.get('lastNightAvg', hrv.get('weeklyAvg', 0))
             
             # ==================== CONSTRUCTION DE LA RÉPONSE ====================
             
@@ -123,13 +144,17 @@ class handler(BaseHTTPRequestHandler):
                     "resting": get_value(stats, "restingHeartRate", 0),
                     "max": get_value(stats, "maxHeartRate", 0),
                     "min": get_value(stats, "minHeartRate", 0),
-                    "hrv_avg": get_value(hrv, "lastNightAvg", 0),
-                    "hrv_status": get_value(hrv, "status", None),
-                    "hrv_baseline_low": get_value(hrv, "baselineLowUpper", 0),
-                    "hrv_baseline_balanced": get_value(hrv, "baselineBalancedLow", 0),
+                    
+                    # VFC (HRV) - CORRIGÉ
+                    "hrv_avg": hrv_avg,
+                    "hrv_status": hrv_status,
+                    "hrv_baseline_low": get_value(hrv_data, "baselineLowUpper", 0),
+                    "hrv_baseline_balanced": get_value(hrv_data, "baselineBalancedLow", 0),
+                    "hrv_last_night": get_value(hrv_data, "lastNightAvg", 0),
+                    "hrv_last_night_5min": get_value(hrv_data, "lastNight5MinHigh", 0),
                 },
                 
-                # SOMMEIL DÉTAILLÉ - CORRIGÉ
+                # SOMMEIL DÉTAILLÉ - CORRIGÉ AVEC SLEEP SCORE
                 "sleep": {
                     # Durées
                     "total_hours": round(get_value(daily_sleep, "sleepTimeSeconds", 0) / 3600, 2),
@@ -139,8 +164,17 @@ class handler(BaseHTTPRequestHandler):
                     "awake_hours": round(get_value(daily_sleep, "awakeSleepSeconds", 0) / 3600, 2),
                     "unmeasurable_hours": round(get_value(daily_sleep, "unmeasurableSleepSeconds", 0) / 3600, 2),
                     
-                    # Qualité
+                    # SLEEP SCORE - CORRIGÉ
                     "sleep_score": get_value(daily_sleep, "overallSleepScore", 0),
+                    "sleep_score_feedback": get_value(daily_sleep, "sleepScoreFeedback", None),
+                    "sleep_score_insight": get_value(daily_sleep, "sleepScoreInsight", None),
+                    
+                    # Scores détaillés (si disponibles)
+                    "sleep_score_quality": get_value(sleep_scores, "qualityValue", 0) if sleep_scores else 0,
+                    "sleep_score_recovery": get_value(sleep_scores, "recoveryValue", 0) if sleep_scores else 0,
+                    "sleep_score_duration": get_value(sleep_scores, "durationValue", 0) if sleep_scores else 0,
+                    
+                    # Qualité
                     "sleep_quality": get_value(daily_sleep, "sleepQualityTypeName", None),
                     "awake_count": get_value(daily_sleep, "awakeCount", 0),
                     "avg_sleep_stress": get_value(daily_sleep, "avgSleepStress", 0),
@@ -153,10 +187,13 @@ class handler(BaseHTTPRequestHandler):
                     # Siestes
                     "nap_time_hours": round(get_value(daily_sleep, "napTimeSeconds", 0) / 3600, 2),
                     
-                    # Respiration
+                    # Respiration pendant le sommeil
                     "avg_respiration": get_value(daily_sleep, "avgSleepRespiration", 0),
                     "lowest_respiration": get_value(daily_sleep, "lowestRespiration", 0),
                     "highest_respiration": get_value(daily_sleep, "highestRespiration", 0),
+                    
+                    # SpO2 pendant le sommeil
+                    "avg_spo2_sleep": get_value(daily_sleep, "avgOxygenSaturation", 0),
                     
                     # Niveaux de sommeil (données détaillées)
                     "sleep_levels_count": len(sleep_levels) if sleep_levels else 0,

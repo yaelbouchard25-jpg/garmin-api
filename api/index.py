@@ -45,101 +45,25 @@ class handler(BaseHTTPRequestHandler):
             # Fonction CORRIGÉE pour gérer les erreurs ET les méthodes manquantes
             def safe_get(method_name, *args):
                 try:
-                    # Vérifier si la méthode existe
                     if hasattr(client, method_name):
                         method = getattr(client, method_name)
                         result = method(*args)
-                        # Si le résultat est None, retourner un dict ou list vide selon le contexte
                         if result is None:
-                            # Deviner le type de retour basé sur le nom de la méthode
-                            if 'activities' in method_name or 'goals' in method_name or 'events' in method_name:
+                            if 'activities' in method_name or 'goals' in method_name or 'events' in method_name or 'pressure' in method_name:
                                 return []
                             else:
                                 return {}
                         return result
                     else:
-                        # Méthode n'existe pas, retourner dict ou list vide
-                        if 'activities' in method_name or 'goals' in method_name or 'events' in method_name:
+                        if 'activities' in method_name or 'goals' in method_name or 'events' in method_name or 'pressure' in method_name:
                             return []
                         else:
                             return {}
                 except Exception:
-                    # En cas d'erreur, retourner dict ou list vide
-                    if 'activities' in method_name or 'goals' in method_name or 'events' in method_name:
+                    if 'activities' in method_name or 'goals' in method_name or 'events' in method_name or 'pressure' in method_name:
                         return []
                     else:
                         return {}
-            
-            # ==================== RÉCUPÉRATION DE TOUTES LES DONNÉES ====================
-            
-            # 1. Statistiques de base (toujours disponibles)
-            stats = safe_get('get_stats', date_str)
-            
-            # 2. Sommeil
-            sleep_data = safe_get('get_sleep_data', date_str)
-            
-            # 3. Fréquence cardiaque détaillée
-            heart_rates = safe_get('get_heart_rates', date_str)
-            
-            # 4. Activités du jour
-            activities = safe_get('get_activities_by_date', date_str, date_str)
-            
-            # 5. Stress détaillé
-            stress_data = safe_get('get_stress_data', date_str)
-            
-            # 6. Body Battery
-            body_battery = safe_get('get_body_battery', date_str, date_str)
-            
-            # 7. Respiration
-            respiration = safe_get('get_respiration_data', date_str)
-            
-            # 8. SpO2
-            spo2 = safe_get('get_spo2_data', date_str)
-            
-            # 9. HRV (Variabilité fréquence cardiaque)
-            hrv = safe_get('get_hrv_data', date_str)
-            
-            # 10. Training Readiness
-            training_readiness = safe_get('get_training_readiness', date_str)
-            
-            # 11. Training Status
-            training_status = safe_get('get_training_status', date_str)
-            
-            # 12. Max Metrics (VO2 Max, etc.)
-            max_metrics = safe_get('get_max_metrics', date_str)
-            
-            # 13. Hydratation
-            hydration = safe_get('get_hydration_data', date_str)
-            
-            # 14. Poids
-            weight = safe_get('get_weigh_ins', date_str)
-            
-            # 15. Composition corporelle
-            body_comp = safe_get('get_body_composition', date_str, date_str)
-            
-            # 16. Tension artérielle
-            blood_pressure = safe_get('get_blood_pressure', date_str, date_str)
-            
-            # 17. Hill Score
-            hill_score = safe_get('get_hill_score', date_str, date_str)
-            
-            # 18. Endurance Score
-            endurance_score = safe_get('get_endurance_score', date_str, date_str)
-            
-            # 19. Race Predictions
-            race_predictions = safe_get('get_race_predictions')
-            
-            # 20. Données solaires
-            solar_data = safe_get('get_solar_data')
-            
-            # 21. Objectifs
-            active_goals = safe_get('get_active_goals')
-            
-            # 22. Wellness Events
-            wellness_events = safe_get('get_daily_wellness_events', date_str)
-            
-            # 23. Fitness Age (nom corrigé)
-            fitness_age_data = safe_get('get_fitnessage_data', date_str)
             
             # Fonction helper pour accéder aux données en toute sécurité
             def get_value(data, key, default=0):
@@ -147,8 +71,33 @@ class handler(BaseHTTPRequestHandler):
                     return data.get(key, default)
                 return default
             
+            # ==================== RÉCUPÉRATION DE TOUTES LES DONNÉES ====================
+            
+            stats = safe_get('get_stats', date_str)
+            sleep_data = safe_get('get_sleep_data', date_str)
+            heart_rates = safe_get('get_heart_rates', date_str)
+            activities = safe_get('get_activities_by_date', date_str, date_str)
+            stress_data = safe_get('get_stress_data', date_str)
+            body_battery = safe_get('get_body_battery', date_str, date_str)
+            respiration = safe_get('get_respiration_data', date_str)
+            spo2 = safe_get('get_spo2_data', date_str)
+            hrv = safe_get('get_hrv_data', date_str)
+            training_readiness = safe_get('get_training_readiness', date_str)
+            training_status = safe_get('get_training_status', date_str)
+            max_metrics = safe_get('get_max_metrics', date_str)
+            hydration = safe_get('get_hydration_data', date_str)
+            weight = safe_get('get_weigh_ins', date_str)
+            body_comp = safe_get('get_body_composition', date_str, date_str)
+            blood_pressure = safe_get('get_blood_pressure', date_str, date_str)
+            hill_score = safe_get('get_hill_score', date_str, date_str)
+            endurance_score = safe_get('get_endurance_score', date_str, date_str)
+            race_predictions = safe_get('get_race_predictions')
+            solar_data = safe_get('get_solar_data')
+            active_goals = safe_get('get_active_goals')
+            wellness_events = safe_get('get_daily_wellness_events', date_str)
+            fitness_age_data = safe_get('get_fitnessage_data', date_str)
+            
             # ==================== CONSTRUCTION DE LA RÉPONSE ====================
-
             
             data = {
                 "date": date_str,
@@ -193,7 +142,7 @@ class handler(BaseHTTPRequestHandler):
                     "drained": get_value(stats, "bodyBatteryDrainedValue", 0),
                     "highest": get_value(stats, "bodyBatteryHighestValue", 0),
                     "lowest": get_value(stats, "bodyBatteryLowestValue", 0),
-                    "current": body_battery[-1].get("charged", 0) if body_battery and len(body_battery) > 0 else 0,
+                    "current": body_battery[-1].get("charged", 0) if isinstance(body_battery, list) and len(body_battery) > 0 else 0,
                 },
                 
                 # STRESS
@@ -233,7 +182,7 @@ class handler(BaseHTTPRequestHandler):
                 
                 # ACTIVITÉS
                 "activities": {
-                    "count": len(activities) if activities else 0,
+                    "count": len(activities) if isinstance(activities, list) else 0,
                     "list": [
                         {
                             "name": act.get("activityName", ""),
@@ -246,7 +195,7 @@ class handler(BaseHTTPRequestHandler):
                             "avg_speed": round(act.get("averageSpeed", 0) * 3.6, 2),
                             "elevation_gain": act.get("elevationGain", 0),
                         }
-                        for act in (activities[:20] if activities else [])
+                        for act in (activities[:20] if isinstance(activities, list) else [])
                     ]
                 },
                 
@@ -266,11 +215,23 @@ class handler(BaseHTTPRequestHandler):
                     "goal_ml": get_value(hydration, "goalInML", 0),
                 },
                 
-                # TENSION ARTÉRIELLE
+                # TENSION ARTÉRIELLE - CORRIGÉE
                 "blood_pressure": {
-                    "systolic": blood_pressure[0].get("systolic", 0) if blood_pressure and len(blood_pressure) > 0 else 0,
-                    "diastolic": blood_pressure[0].get("diastolic", 0) if blood_pressure and len(blood_pressure) > 0 else 0,
-                    "pulse": blood_pressure[0].get("pulse", 0) if blood_pressure and len(blood_pressure) > 0 else 0,
+                    "systolic": (
+                        blood_pressure[0].get("systolic", 0) if isinstance(blood_pressure, list) and len(blood_pressure) > 0 
+                        else get_value(blood_pressure, "systolic", 0) if isinstance(blood_pressure, dict) 
+                        else 0
+                    ),
+                    "diastolic": (
+                        blood_pressure[0].get("diastolic", 0) if isinstance(blood_pressure, list) and len(blood_pressure) > 0 
+                        else get_value(blood_pressure, "diastolic", 0) if isinstance(blood_pressure, dict) 
+                        else 0
+                    ),
+                    "pulse": (
+                        blood_pressure[0].get("pulse", 0) if isinstance(blood_pressure, list) and len(blood_pressure) > 0 
+                        else get_value(blood_pressure, "pulse", 0) if isinstance(blood_pressure, dict) 
+                        else 0
+                    ),
                 },
                 
                 # PRÉDICTIONS DE COURSE
@@ -278,15 +239,15 @@ class handler(BaseHTTPRequestHandler):
                 
                 # OBJECTIFS
                 "goals": {
-                    "active_count": len(active_goals) if active_goals else 0,
-                    "list": active_goals if active_goals else []
+                    "active_count": len(active_goals) if isinstance(active_goals, list) else 0,
+                    "list": active_goals if isinstance(active_goals, list) else []
                 },
                 
                 # DONNÉES SOLAIRES
                 "solar": solar_data if solar_data else {},
                 
                 # WELLNESS EVENTS
-                "wellness_events": wellness_events if wellness_events else [],
+                "wellness_events": wellness_events if isinstance(wellness_events, list) else [],
             }
             
             # Envoyer la réponse

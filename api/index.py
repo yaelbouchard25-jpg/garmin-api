@@ -42,7 +42,7 @@ class handler(BaseHTTPRequestHandler):
             client = Garmin(email, password)
             client.login()
             
-            # Fonction CORRIGÉE pour gérer les erreurs ET les méthodes manquantes
+            # Fonction pour gérer les erreurs
             def safe_get(method_name, *args):
                 try:
                     if hasattr(client, method_name):
@@ -65,13 +65,13 @@ class handler(BaseHTTPRequestHandler):
                     else:
                         return {}
             
-            # Fonction helper pour accéder aux données en toute sécurité
+            # Fonction helper pour accéder aux données
             def get_value(data, key, default=0):
                 if data and isinstance(data, dict):
                     return data.get(key, default)
                 return default
             
-            # ==================== RÉCUPÉRATION DE TOUTES LES DONNÉES ====================
+            # ==================== RÉCUPÉRATION DES DONNÉES ====================
             
             stats = safe_get('get_stats', date_str)
             sleep_data = safe_get('get_sleep_data', date_str)
@@ -89,13 +89,12 @@ class handler(BaseHTTPRequestHandler):
             weight = safe_get('get_weigh_ins', date_str)
             body_comp = safe_get('get_body_composition', date_str, date_str)
             blood_pressure = safe_get('get_blood_pressure', date_str, date_str)
-            hill_score = safe_get('get_hill_score', date_str, date_str)
-            endurance_score = safe_get('get_endurance_score', date_str, date_str)
-            race_predictions = safe_get('get_race_predictions')
-            solar_data = safe_get('get_solar_data')
-            active_goals = safe_get('get_active_goals')
-            wellness_events = safe_get('get_daily_wellness_events', date_str)
-            fitness_age_data = safe_get('get_fitnessage_data', date_str)
+            steps_data = safe_get('get_steps_data', date_str)
+            
+            # Extraire dailySleepDTO correctement
+            daily_sleep = sleep_data.get('dailySleepDTO', {}) if isinstance(sleep_data, dict) else {}
+            sleep_levels = sleep_data.get('sleepLevels', []) if isinstance(sleep_data, dict) else []
+            sleep_movement = sleep_data.get('sleepMovement', []) if isinstance(sleep_data, dict) else []
             
             # ==================== CONSTRUCTION DE LA RÉPONSE ====================
             
@@ -109,10 +108,13 @@ class handler(BaseHTTPRequestHandler):
                     "distance_km": round(get_value(stats, "totalDistanceMeters", 0) / 1000, 2),
                     "calories_active": get_value(stats, "activeKilocalories", 0),
                     "calories_total": get_value(stats, "totalKilocalories", 0),
+                    "calories_bmr": get_value(stats, "bmrKilocalories", 0),
                     "floors_ascended": get_value(stats, "floorsAscended", 0),
                     "floors_descended": get_value(stats, "floorsDescended", 0),
                     "intensity_minutes_moderate": get_value(stats, "moderateIntensityMinutes", 0),
                     "intensity_minutes_vigorous": get_value(stats, "vigorousIntensityMinutes", 0),
+                    "intensity_minutes_goal": get_value(stats, "intensityMinutesGoal", 0),
+                    "steps_goal": get_value(stats, "dailyStepGoal", 0),
                 },
                 
                 # FRÉQUENCE CARDIAQUE
@@ -123,17 +125,42 @@ class handler(BaseHTTPRequestHandler):
                     "min": get_value(stats, "minHeartRate", 0),
                     "hrv_avg": get_value(hrv, "lastNightAvg", 0),
                     "hrv_status": get_value(hrv, "status", None),
+                    "hrv_baseline_low": get_value(hrv, "baselineLowUpper", 0),
+                    "hrv_baseline_balanced": get_value(hrv, "baselineBalancedLow", 0),
                 },
                 
-                # SOMMEIL
+                # SOMMEIL DÉTAILLÉ - CORRIGÉ
                 "sleep": {
-                    "total_hours": round(get_value(stats, "sleepingSeconds", 0) / 3600, 2),
-                    "deep_hours": round(get_value(sleep_data, "deepSleepSeconds", 0) / 3600, 2),
-                    "light_hours": round(get_value(sleep_data, "lightSleepSeconds", 0) / 3600, 2),
-                    "rem_hours": round(get_value(sleep_data, "remSleepSeconds", 0) / 3600, 2),
-                    "awake_hours": round(get_value(sleep_data, "awakeSleepSeconds", 0) / 3600, 2),
-                    "sleep_score": get_value(sleep_data, "overallSleepScore", 0),
-                    "sleep_quality": get_value(sleep_data, "sleepQualityTypeName", None),
+                    # Durées
+                    "total_hours": round(get_value(daily_sleep, "sleepTimeSeconds", 0) / 3600, 2),
+                    "deep_hours": round(get_value(daily_sleep, "deepSleepSeconds", 0) / 3600, 2),
+                    "light_hours": round(get_value(daily_sleep, "lightSleepSeconds", 0) / 3600, 2),
+                    "rem_hours": round(get_value(daily_sleep, "remSleepSeconds", 0) / 3600, 2),
+                    "awake_hours": round(get_value(daily_sleep, "awakeSleepSeconds", 0) / 3600, 2),
+                    "unmeasurable_hours": round(get_value(daily_sleep, "unmeasurableSleepSeconds", 0) / 3600, 2),
+                    
+                    # Qualité
+                    "sleep_score": get_value(daily_sleep, "overallSleepScore", 0),
+                    "sleep_quality": get_value(daily_sleep, "sleepQualityTypeName", None),
+                    "awake_count": get_value(daily_sleep, "awakeCount", 0),
+                    "avg_sleep_stress": get_value(daily_sleep, "avgSleepStress", 0),
+                    
+                    # Horaires
+                    "sleep_start": get_value(daily_sleep, "sleepStartTimestampLocal", None),
+                    "sleep_end": get_value(daily_sleep, "sleepEndTimestampLocal", None),
+                    "sleep_window_confirmed": get_value(daily_sleep, "sleepWindowConfirmed", False),
+                    
+                    # Siestes
+                    "nap_time_hours": round(get_value(daily_sleep, "napTimeSeconds", 0) / 3600, 2),
+                    
+                    # Respiration
+                    "avg_respiration": get_value(daily_sleep, "avgSleepRespiration", 0),
+                    "lowest_respiration": get_value(daily_sleep, "lowestRespiration", 0),
+                    "highest_respiration": get_value(daily_sleep, "highestRespiration", 0),
+                    
+                    # Niveaux de sommeil (données détaillées)
+                    "sleep_levels_count": len(sleep_levels) if sleep_levels else 0,
+                    "sleep_movements_count": len(sleep_movement) if sleep_movement else 0,
                 },
                 
                 # BODY BATTERY
@@ -175,9 +202,9 @@ class handler(BaseHTTPRequestHandler):
                     "readiness_level": get_value(training_readiness, "level", None),
                     "training_status": get_value(training_status, "trainingStatus", None),
                     "vo2_max": get_value(max_metrics, "vo2MaxValue", 0),
-                    "fitness_age": get_value(fitness_age_data, "fitnessAge", 0),
-                    "hill_score": get_value(hill_score, "hillScore", 0),
-                    "endurance_score": get_value(endurance_score, "enduranceScore", 0),
+                    "fitness_age": get_value(max_metrics, "fitnessAge", 0),
+                    "vo2_max_running": get_value(max_metrics, "vo2MaxRunningValue", 0),
+                    "vo2_max_cycling": get_value(max_metrics, "vo2MaxCyclingValue", 0),
                 },
                 
                 # ACTIVITÉS
@@ -194,6 +221,9 @@ class handler(BaseHTTPRequestHandler):
                             "max_hr": act.get("maxHR", 0),
                             "avg_speed": round(act.get("averageSpeed", 0) * 3.6, 2),
                             "elevation_gain": act.get("elevationGain", 0),
+                            "elevation_loss": act.get("elevationLoss", 0),
+                            "avg_cadence": act.get("averageRunningCadenceInStepsPerMinute", 0),
+                            "max_cadence": act.get("maxRunningCadenceInStepsPerMinute", 0),
                         }
                         for act in (activities[:20] if isinstance(activities, list) else [])
                     ]
@@ -207,15 +237,18 @@ class handler(BaseHTTPRequestHandler):
                     "body_water_percentage": get_value(body_comp, "bodyWater", 0),
                     "bone_mass_kg": get_value(body_comp, "boneMass", 0),
                     "muscle_mass_kg": get_value(body_comp, "muscleMass", 0),
+                    "metabolic_age": get_value(body_comp, "metabolicAge", 0),
+                    "visceral_fat": get_value(body_comp, "visceralFat", 0),
                 },
                 
                 # HYDRATATION
                 "hydration": {
                     "total_ml": get_value(hydration, "valueInML", 0),
                     "goal_ml": get_value(hydration, "goalInML", 0),
+                    "sweat_loss_ml": get_value(hydration, "sweatLossInML", 0),
                 },
                 
-                # TENSION ARTÉRIELLE - CORRIGÉE
+                # TENSION ARTÉRIELLE
                 "blood_pressure": {
                     "systolic": (
                         blood_pressure[0].get("systolic", 0) if isinstance(blood_pressure, list) and len(blood_pressure) > 0 
@@ -233,21 +266,6 @@ class handler(BaseHTTPRequestHandler):
                         else 0
                     ),
                 },
-                
-                # PRÉDICTIONS DE COURSE
-                "race_predictions": race_predictions if race_predictions else {},
-                
-                # OBJECTIFS
-                "goals": {
-                    "active_count": len(active_goals) if isinstance(active_goals, list) else 0,
-                    "list": active_goals if isinstance(active_goals, list) else []
-                },
-                
-                # DONNÉES SOLAIRES
-                "solar": solar_data if solar_data else {},
-                
-                # WELLNESS EVENTS
-                "wellness_events": wellness_events if isinstance(wellness_events, list) else [],
             }
             
             # Envoyer la réponse

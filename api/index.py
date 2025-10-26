@@ -9,6 +9,66 @@ import traceback
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
+            # Récupérer paramètres URL
+            parsed_url = urlparse(self.path)
+            params = parse_qs(parsed_url.query)
+            
+            # VÉRIFIER MODE DEBUG EN PREMIER
+            if 'debug' in params:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                debug_response = {
+                    "DEBUG_MODE": True,
+                    "message": "Mode debug activé - récupération des données brutes...",
+                    "params_received": str(params)
+                }
+                self.wfile.write(json.dumps(debug_response, indent=2).encode())
+                
+                # Maintenant récupérer les vraies données
+                email = os.environ.get('GARMIN_EMAIL')
+                password = os.environ.get('GARMIN_PASSWORD')
+                
+                if not email or not password:
+                    return
+                
+                date_str = params['date'][0] if 'date' in params and params['date'][0] else datetime.now().strftime("%Y-%m-%d")
+                
+                try:
+                    client = Garmin(email, password)
+                    client.login()
+                    
+                    sleep_data = client.get_sleep_data(date_str)
+                    hrv = client.get_hrv_data(date_str)
+                    
+                    debug_full = {
+                        "DEBUG_MODE": True,
+                        "date": date_str,
+                        "sleep_data_type": str(type(sleep_data)),
+                        "sleep_data_keys": list(sleep_data.keys()) if isinstance(sleep_data, dict) else "not_dict",
+                        "sleep_data_sample": str(sleep_data)[:2000],
+                        "hrv_type": str(type(hrv)),
+                        "hrv_keys": list(hrv.keys()) if isinstance(hrv, dict) else "not_dict",
+                        "hrv_sample": str(hrv)[:2000],
+                    }
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(debug_full, indent=2).encode())
+                except Exception as e:
+                    error_debug = {
+                        "DEBUG_MODE": True,
+                        "error": str(e),
+                        "traceback": traceback.format_exc()
+                    }
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(error_debug, indent=2).encode())
+                return
+            
+            # MODE NORMAL (sans debug)
             email = os.environ.get('GARMIN_EMAIL')
             password = os.environ.get('GARMIN_PASSWORD')
             
@@ -20,14 +80,6 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(response).encode())
                 return
             
-            # Récupérer paramètres URL
-            parsed_url = urlparse(self.path)
-            params = parse_qs(parsed_url.query)
-            
-            # Mode debug
-            debug_mode = 'debug' in params
-            
-            # Date
             if 'date' in params and params['date'][0]:
                 date_str = params['date'][0]
                 try:
@@ -46,7 +98,7 @@ class handler(BaseHTTPRequestHandler):
             client = Garmin(email, password)
             client.login()
             
-            # Fonction conversion secondes -> HH:MM
+            # Fonction conversion temps
             def sec_to_time(seconds):
                 if not seconds or seconds == 0:
                     return "0h00"
@@ -54,18 +106,17 @@ class handler(BaseHTTPRequestHandler):
                 m = int((seconds % 3600) // 60)
                 return f"{h}h{m:02d}"
             
-            # Fonction sécurisée
             def safe_get(method_name, *args):
                 try:
                     if hasattr(client, method_name):
                         method = getattr(client, method_name)
                         result = method(*args)
                         if result is None:
-                            return [] if 'activit' in method_name or 'pressure' in method_name or 'goal' in method_name else {}
+                            return [] if 'activit' in method_name or 'pressure' in method_name else {}
                         return result
-                    return [] if 'activit' in method_name or 'pressure' in method_name or 'goal' in method_name else {}
+                    return [] if 'activit' in method_name or 'pressure' in method_name else {}
                 except:
-                    return [] if 'activit' in method_name or 'pressure' in method_name or 'goal' in method_name else {}
+                    return [] if 'activit' in method_name or 'pressure' in method_name else {}
             
             def get_val(data, key, default=0):
                 if data and isinstance(data, dict):
@@ -75,7 +126,6 @@ class handler(BaseHTTPRequestHandler):
             # Récupération données
             stats = safe_get('get_stats', date_str)
             sleep_data = safe_get('get_sleep_data', date_str)
-            heart_rates = safe_get('get_heart_rates', date_str)
             activities = safe_get('get_activities_by_date', date_str, date_str)
             stress_data = safe_get('get_stress_data', date_str)
             body_battery = safe_get('get_body_battery', date_str, date_str)
@@ -89,27 +139,6 @@ class handler(BaseHTTPRequestHandler):
             weight = safe_get('get_weigh_ins', date_str)
             body_comp = safe_get('get_body_composition', date_str, date_str)
             blood_pressure = safe_get('get_blood_pressure', date_str, date_str)
-            
-            # MODE DEBUG
-            if debug_mode:
-                try:
-                    debug_data = {
-                        "date": date_str,
-                        "debug_mode": True,
-                        "sleep_data": str(sleep_data)[:3000] if sleep_data else "empty",
-                        "hrv": str(hrv)[:3000] if hrv else "empty",
-                    }
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps(debug_data, indent=2).encode())
-                    return
-                except Exception as debug_err:
-                    self.send_response(500)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"debug_error": str(debug_err)}).encode())
-                    return
             
             # Extraction sommeil
             daily_sleep = {}
@@ -138,12 +167,10 @@ class handler(BaseHTTPRequestHandler):
             sleep_unmeas_sec = get_val(daily_sleep, "unmeasurableSleepSeconds", 0)
             sleep_nap_sec = get_val(daily_sleep, "napTimeSeconds", 0)
             
-            # Construction réponse COMPLÈTE
+            # Réponse complète
             data = {
                 "date": date_str,
                 "timestamp": datetime.now().isoformat(),
-                
-                # BASIC STATS - COMPLET
                 "basic_stats": {
                     "steps": get_val(stats, "totalSteps", 0),
                     "distance_km": round(get_val(stats, "totalDistanceMeters", 0) / 1000, 2),
@@ -157,8 +184,6 @@ class handler(BaseHTTPRequestHandler):
                     "intensity_minutes_goal": get_val(stats, "intensityMinutesGoal", 0),
                     "steps_goal": get_val(stats, "dailyStepGoal", 0),
                 },
-                
-                # HEART RATE - COMPLET
                 "heart_rate": {
                     "avg": get_val(stats, "averageHeartRateInBeatsPerMinute", 0),
                     "resting": get_val(stats, "restingHeartRate", 0),
@@ -171,59 +196,40 @@ class handler(BaseHTTPRequestHandler):
                     "hrv_last_night": hrv_last_night,
                     "hrv_last_night_5min": get_val(hrv, "lastNight5MinHigh", 0),
                 },
-                
-                # SLEEP - COMPLET AVEC FORMAT TEMPS
                 "sleep": {
-                    # Heures décimales
                     "total_hours": round(sleep_total_sec / 3600, 2),
-                    "deep_hours": round(sleep_deep_sec / 3600, 2),
-                    "light_hours": round(sleep_light_sec / 3600, 2),
-                    "rem_hours": round(sleep_rem_sec / 3600, 2),
-                    "awake_hours": round(sleep_awake_sec / 3600, 2),
-                    "unmeasurable_hours": round(sleep_unmeas_sec / 3600, 2),
-                    "nap_time_hours": round(sleep_nap_sec / 3600, 2),
-                    
-                    # Format HH:MM
                     "total_formatted": sec_to_time(sleep_total_sec),
+                    "deep_hours": round(sleep_deep_sec / 3600, 2),
                     "deep_formatted": sec_to_time(sleep_deep_sec),
+                    "light_hours": round(sleep_light_sec / 3600, 2),
                     "light_formatted": sec_to_time(sleep_light_sec),
+                    "rem_hours": round(sleep_rem_sec / 3600, 2),
                     "rem_formatted": sec_to_time(sleep_rem_sec),
+                    "awake_hours": round(sleep_awake_sec / 3600, 2),
                     "awake_formatted": sec_to_time(sleep_awake_sec),
+                    "unmeasurable_hours": round(sleep_unmeas_sec / 3600, 2),
                     "unmeasurable_formatted": sec_to_time(sleep_unmeas_sec),
+                    "nap_time_hours": round(sleep_nap_sec / 3600, 2),
                     "nap_formatted": sec_to_time(sleep_nap_sec),
-                    
-                    # Sleep score
                     "sleep_score": get_val(daily_sleep, "overallSleepScore", 0),
                     "sleep_score_feedback": get_val(daily_sleep, "sleepScoreFeedback", None),
                     "sleep_score_insight": get_val(daily_sleep, "sleepScoreInsight", None),
                     "sleep_score_quality": 0,
                     "sleep_score_recovery": 0,
                     "sleep_score_duration": 0,
-                    
-                    # Qualité
                     "sleep_quality": get_val(daily_sleep, "sleepQualityTypeName", None),
                     "awake_count": get_val(daily_sleep, "awakeCount", 0),
                     "avg_sleep_stress": get_val(daily_sleep, "avgSleepStress", 0),
-                    
-                    # Horaires
                     "sleep_start": get_val(daily_sleep, "sleepStartTimestampLocal", None),
                     "sleep_end": get_val(daily_sleep, "sleepEndTimestampLocal", None),
                     "sleep_window_confirmed": get_val(daily_sleep, "sleepWindowConfirmed", False),
-                    
-                    # Respiration sommeil
                     "avg_respiration": get_val(daily_sleep, "avgSleepRespiration", 0),
                     "lowest_respiration": get_val(daily_sleep, "lowestRespiration", 0),
                     "highest_respiration": get_val(daily_sleep, "highestRespiration", 0),
-                    
-                    # SpO2 sommeil
                     "avg_spo2_sleep": get_val(daily_sleep, "avgOxygenSaturation", 0),
-                    
-                    # Niveaux
                     "sleep_levels_count": len(sleep_levels) if sleep_levels else 0,
                     "sleep_movements_count": len(sleep_movement) if sleep_movement else 0,
                 },
-                
-                # BODY BATTERY - COMPLET
                 "body_battery": {
                     "charged": get_val(stats, "bodyBatteryChargedValue", 0),
                     "drained": get_val(stats, "bodyBatteryDrainedValue", 0),
@@ -231,8 +237,6 @@ class handler(BaseHTTPRequestHandler):
                     "lowest": get_val(stats, "bodyBatteryLowestValue", 0),
                     "current": body_battery[-1].get("charged", 0) if isinstance(body_battery, list) and len(body_battery) > 0 else 0,
                 },
-                
-                # STRESS - COMPLET
                 "stress": {
                     "avg": get_val(stats, "averageStressLevel", 0),
                     "max": get_val(stats, "maxStressLevel", 0),
@@ -242,21 +246,15 @@ class handler(BaseHTTPRequestHandler):
                     "medium_time_minutes": get_val(stress_data, "mediumStressMinutes", 0),
                     "high_time_minutes": get_val(stress_data, "highStressMinutes", 0),
                 },
-                
-                # RESPIRATION - COMPLET
                 "respiration": {
                     "avg_waking": get_val(respiration, "avgWakingRespirationValue", 0),
                     "highest": get_val(respiration, "highestRespirationValue", 0),
                     "lowest": get_val(respiration, "lowestRespirationValue", 0),
                 },
-                
-                # SPO2 - COMPLET
                 "spo2": {
                     "avg": get_val(spo2, "averageSpo2Value", 0),
                     "lowest": get_val(spo2, "lowestSpo2Value", 0),
                 },
-                
-                # TRAINING - COMPLET
                 "training": {
                     "readiness_score": get_val(training_readiness, "score", 0),
                     "readiness_level": get_val(training_readiness, "level", None),
@@ -266,8 +264,6 @@ class handler(BaseHTTPRequestHandler):
                     "vo2_max_running": get_val(max_metrics, "vo2MaxRunningValue", 0),
                     "vo2_max_cycling": get_val(max_metrics, "vo2MaxCyclingValue", 0),
                 },
-                
-                # ACTIVITIES - COMPLET AVEC FORMAT TEMPS
                 "activities": {
                     "count": len(activities) if isinstance(activities, list) else 0,
                     "list": [
@@ -289,8 +285,6 @@ class handler(BaseHTTPRequestHandler):
                         for act in (activities[:20] if isinstance(activities, list) else [])
                     ]
                 },
-                
-                # BODY COMPOSITION - COMPLET
                 "body_composition": {
                     "weight_kg": get_val(weight, "weight", 0) / 1000 if get_val(weight, "weight", 0) > 0 else 0,
                     "bmi": get_val(body_comp, "bmi", 0),
@@ -301,15 +295,11 @@ class handler(BaseHTTPRequestHandler):
                     "metabolic_age": get_val(body_comp, "metabolicAge", 0),
                     "visceral_fat": get_val(body_comp, "visceralFat", 0),
                 },
-                
-                # HYDRATION - COMPLET
                 "hydration": {
                     "total_ml": get_val(hydration, "valueInML", None),
                     "goal_ml": get_val(hydration, "goalInML", 0),
                     "sweat_loss_ml": get_val(hydration, "sweatLossInML", None),
                 },
-                
-                # BLOOD PRESSURE - COMPLET
                 "blood_pressure": {
                     "systolic": (
                         blood_pressure[0].get("systolic", 0) if isinstance(blood_pressure, list) and len(blood_pressure) > 0 
@@ -329,7 +319,6 @@ class handler(BaseHTTPRequestHandler):
                 },
             }
             
-            # Envoyer réponse
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()

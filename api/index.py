@@ -109,29 +109,22 @@ class handler(BaseHTTPRequestHandler):
                 except:
                     return {} if 'activit' not in method_name else []
             
-            # Fonction pour chercher dans plusieurs clés possibles
-            def get_val_multi(data, keys, default=0):
-                """Cherche la valeur dans plusieurs clés possibles"""
-                if not data or not isinstance(data, dict):
-                    return default
-                
-                if isinstance(keys, str):
-                    keys = [keys]
-                
-                for key in keys:
-                    if key in data and data[key] is not None:
-                        value = data[key]
-                        # Ne retourner 0 que si c'est vraiment 0, pas None
-                        if value != 0 or (value == 0 and default != 0):
-                            return value
-                
-                return default
-            
             def get_val(data, key, default=0):
                 if data and isinstance(data, dict):
                     val = data.get(key)
                     return val if val is not None else default
                 return default
+            
+            # NOUVELLE FONCTION pour accéder aux données imbriquées
+            def get_nested_val(data, *keys, default=0):
+                """Accède aux valeurs imbriquées dans des dictionnaires"""
+                result = data
+                for key in keys:
+                    if isinstance(result, dict) and key in result:
+                        result = result[key]
+                    else:
+                        return default
+                return result if result is not None else default
             
             # Récupération données
             stats = safe_get('get_stats', date_str)
@@ -155,21 +148,41 @@ class handler(BaseHTTPRequestHandler):
             sleep_levels = sleep_data.get('sleepLevels', []) if isinstance(sleep_data, dict) else []
             sleep_movement = sleep_data.get('sleepMovement', []) if isinstance(sleep_data, dict) else []
             
-            # Extraction HRV avec clés multiples
-            hrv_status = get_val_multi(hrv, ['status', 'hrvStatus'], None)
-            hrv_avg = get_val_multi(hrv, ['lastNightAvg', 'weeklyAvg', 'lastSevenDaysAvg'], 0)
-            hrv_last_night = get_val_multi(hrv, ['lastNightAvg', 'value'], 0)
-            hrv_baseline_low = get_val_multi(hrv, ['baselineLowUpper', 'baselineLow'], 0)
-            hrv_baseline_balanced = get_val_multi(hrv, ['baselineBalancedLow', 'baselineBalanced'], 0)
-            hrv_last_night_5min = get_val_multi(hrv, ['lastNight5MinHigh', 'fiveMinuteHigh'], 0)
+            # ✅ CORRECTION HRV - Les données sont dans hrvSummary
+            hrv_summary = hrv.get('hrvSummary', {}) if isinstance(hrv, dict) else {}
+            hrv_baseline = hrv_summary.get('baseline', {}) if isinstance(hrv_summary, dict) else {}
             
-            # Extraction SPO2 avec clés multiples
-            spo2_avg = get_val_multi(spo2, ['averageSpo2Value', 'avgSpO2', 'averageSpO2', 'calendarDate'], 0)
-            spo2_lowest = get_val_multi(spo2, ['lowestSpo2Value', 'lowestSpO2', 'minSpO2'], 0)
+            hrv_status = get_val(hrv_summary, 'status', None)
+            hrv_weekly_avg = get_val(hrv_summary, 'weeklyAvg', 0)
+            hrv_last_night = get_val(hrv_summary, 'lastNightAvg', 0)
+            hrv_last_night_5min = get_val(hrv_summary, 'lastNight5MinHigh', 0)
+            hrv_baseline_low = get_val(hrv_baseline, 'lowUpper', 0)
+            hrv_baseline_balanced_low = get_val(hrv_baseline, 'balancedLow', 0)
+            hrv_baseline_balanced_upper = get_val(hrv_baseline, 'balancedUpper', 0)
             
-            # Extraction training avec clés multiples
-            readiness_score = get_val_multi(training_readiness, ['score', 'trainingReadinessScore', 'readiness'], 0)
-            readiness_level = get_val_multi(training_readiness, ['level', 'readinessLevel'], None)
+            # ✅ CORRECTION SPO2 - Les noms corrects
+            spo2_avg = get_val(spo2, 'averageSpO2', 0)
+            spo2_lowest = get_val(spo2, 'lowestSpO2', 0)
+            spo2_avg_sleep = get_val(spo2, 'avgSleepSpO2', 0)
+            
+            # ✅ CORRECTION Training Readiness - C'est une LISTE !
+            if isinstance(training_readiness, list) and len(training_readiness) > 0:
+                tr_data = training_readiness[0]
+                readiness_score = get_val(tr_data, 'score', 0)
+                readiness_level = get_val(tr_data, 'level', None)
+                readiness_feedback_short = get_val(tr_data, 'feedbackShort', None)
+                readiness_feedback_long = get_val(tr_data, 'feedbackLong', None)
+                readiness_sleep_score = get_val(tr_data, 'sleepScore', 0)
+                readiness_recovery_time = get_val(tr_data, 'recoveryTime', 0)
+                readiness_hrv_weekly = get_val(tr_data, 'hrvWeeklyAverage', 0)
+            else:
+                readiness_score = 0
+                readiness_level = None
+                readiness_feedback_short = None
+                readiness_feedback_long = None
+                readiness_sleep_score = 0
+                readiness_recovery_time = 0
+                readiness_hrv_weekly = 0
             
             # Durées sommeil
             sleep_total_sec = get_val(daily_sleep, "sleepTimeSeconds", 0)
@@ -181,15 +194,20 @@ class handler(BaseHTTPRequestHandler):
             sleep_nap_sec = get_val(daily_sleep, "napTimeSeconds", 0)
             
             # FC moyenne : chercher dans les activités si pas dans stats
-            avg_hr = get_val_multi(stats, ['averageHeartRateInBeatsPerMinute', 'avgHeartRate', 'averageHR'], 0)
+            avg_hr = get_val(stats, 'averageHeartRateInBeatsPerMinute', 0)
+            if avg_hr == 0:
+                avg_hr = get_val(stats, 'avgHeartRate', 0)
             if avg_hr == 0 and isinstance(activities, list) and len(activities) > 0:
-                # Calculer la moyenne des FC des activités
                 hr_values = [act.get('averageHR', 0) for act in activities if act.get('averageHR', 0) > 0]
                 avg_hr = round(sum(hr_values) / len(hr_values)) if hr_values else 0
             
-            # Hydration avec clés multiples
-            hydration_total = get_val_multi(hydration, ['valueInML', 'value', 'totalHydration'], None)
-            hydration_sweat = get_val_multi(hydration, ['sweatLossInML', 'sweatLoss', 'estimatedSweatLoss'], None)
+            # Hydration
+            hydration_total = get_val(hydration, 'valueInML', None)
+            hydration_goal = get_val(hydration, 'goalInML', 0)
+            hydration_sweat = get_val(hydration, 'sweatLossInML', None)
+            
+            # Sleep scores
+            sleep_scores = daily_sleep.get('sleepScores', {}) if isinstance(daily_sleep, dict) else {}
             
             # Réponse complète
             data = {
@@ -213,12 +231,13 @@ class handler(BaseHTTPRequestHandler):
                     "resting": get_val(stats, "restingHeartRate", 0),
                     "max": get_val(stats, "maxHeartRate", 0),
                     "min": get_val(stats, "minHeartRate", 0),
-                    "hrv_avg": hrv_avg,
-                    "hrv_status": hrv_status,
-                    "hrv_baseline_low": hrv_baseline_low,
-                    "hrv_baseline_balanced": hrv_baseline_balanced,
+                    "hrv_weekly_avg": hrv_weekly_avg,
                     "hrv_last_night": hrv_last_night,
-                    "hrv_last_night_5min": hrv_last_night_5min,
+                    "hrv_last_night_5min_high": hrv_last_night_5min,
+                    "hrv_status": hrv_status,
+                    "hrv_baseline_low_upper": hrv_baseline_low,
+                    "hrv_baseline_balanced_low": hrv_baseline_balanced_low,
+                    "hrv_baseline_balanced_upper": hrv_baseline_balanced_upper,
                 },
                 "sleep": {
                     "total_hours": round(sleep_total_sec / 3600, 2),
@@ -235,22 +254,21 @@ class handler(BaseHTTPRequestHandler):
                     "unmeasurable_formatted": sec_to_time(sleep_unmeas_sec),
                     "nap_time_hours": round(sleep_nap_sec / 3600, 2),
                     "nap_formatted": sec_to_time(sleep_nap_sec),
-                    "sleep_score": get_val_multi(daily_sleep, ['overallSleepScore', 'sleepScore', 'score'], 0),
+                    "sleep_score_overall": get_val(sleep_scores, 'overall', 0),
+                    "sleep_score_quality": get_val(sleep_scores, 'qualityScore', 0),
+                    "sleep_score_recovery": get_val(sleep_scores, 'recoveryScore', 0),
+                    "sleep_score_duration": get_val(sleep_scores, 'durationScore', 0),
                     "sleep_score_feedback": get_val(daily_sleep, "sleepScoreFeedback", None),
                     "sleep_score_insight": get_val(daily_sleep, "sleepScoreInsight", None),
-                    "sleep_score_quality": get_val_multi(daily_sleep, ['sleepScoreQuality', 'qualityScore'], 0),
-                    "sleep_score_recovery": get_val_multi(daily_sleep, ['sleepScoreRecovery', 'recoveryScore'], 0),
-                    "sleep_score_duration": get_val_multi(daily_sleep, ['sleepScoreDuration', 'durationScore'], 0),
-                    "sleep_quality": get_val(daily_sleep, "sleepQualityTypeName", None),
                     "awake_count": get_val(daily_sleep, "awakeCount", 0),
                     "avg_sleep_stress": get_val(daily_sleep, "avgSleepStress", 0),
                     "sleep_start": get_val(daily_sleep, "sleepStartTimestampLocal", None),
                     "sleep_end": get_val(daily_sleep, "sleepEndTimestampLocal", None),
                     "sleep_window_confirmed": get_val(daily_sleep, "sleepWindowConfirmed", False),
-                    "avg_respiration": get_val_multi(daily_sleep, ['avgSleepRespiration', 'avgRespiration', 'averageRespiration'], 0),
-                    "lowest_respiration": get_val_multi(daily_sleep, ['lowestRespiration', 'minRespiration'], 0),
-                    "highest_respiration": get_val_multi(daily_sleep, ['highestRespiration', 'maxRespiration'], 0),
-                    "avg_spo2_sleep": get_val_multi(daily_sleep, ['avgOxygenSaturation', 'avgSpO2', 'averageSpO2'], 0),
+                    "avg_respiration": get_val(daily_sleep, 'averageRespirationValue', 0),
+                    "lowest_respiration": get_val(daily_sleep, 'lowestRespirationValue', 0),
+                    "highest_respiration": get_val(daily_sleep, 'highestRespirationValue', 0),
+                    "avg_spo2_sleep": get_val(daily_sleep, 'averageSpO2Value', 0),
                     "sleep_levels_count": len(sleep_levels),
                     "sleep_movements_count": len(sleep_movement),
                 },
@@ -264,29 +282,34 @@ class handler(BaseHTTPRequestHandler):
                 "stress": {
                     "avg": get_val(stats, "averageStressLevel", 0),
                     "max": get_val(stats, "maxStressLevel", 0),
-                    "rest_time_minutes": get_val(stress_data, "restStressMinutes", 0),
-                    "activity_time_minutes": get_val(stress_data, "activityStressMinutes", 0),
-                    "low_time_minutes": get_val(stress_data, "lowStressMinutes", 0),
-                    "medium_time_minutes": get_val(stress_data, "mediumStressMinutes", 0),
-                    "high_time_minutes": get_val(stress_data, "highStressMinutes", 0),
+                    "rest_stress_duration": get_val(stats, "restStressDuration", 0),
+                    "activity_stress_duration": get_val(stats, "activityStressDuration", 0),
+                    "low_stress_duration": get_val(stats, "lowStressDuration", 0),
+                    "medium_stress_duration": get_val(stats, "mediumStressDuration", 0),
+                    "high_stress_duration": get_val(stats, "highStressDuration", 0),
                 },
                 "respiration": {
-                    "avg_waking": get_val_multi(respiration, ['avgWakingRespirationValue', 'averageWakingRespiration', 'avgRespiration'], 0),
-                    "highest": get_val_multi(respiration, ['highestRespirationValue', 'maxRespiration'], 0),
-                    "lowest": get_val_multi(respiration, ['lowestRespirationValue', 'minRespiration'], 0),
+                    "avg_waking": get_val(stats, 'avgWakingRespirationValue', 0),
+                    "highest": get_val(stats, 'highestRespirationValue', 0),
+                    "lowest": get_val(stats, 'lowestRespirationValue', 0),
                 },
                 "spo2": {
                     "avg": spo2_avg,
                     "lowest": spo2_lowest,
+                    "avg_sleep": spo2_avg_sleep,
+                    "last_7_days_avg": get_val(spo2, 'lastSevenDaysAvgSpO2', 0),
                 },
                 "training": {
                     "readiness_score": readiness_score,
                     "readiness_level": readiness_level,
-                    "training_status": get_val_multi(training_status, ['trainingStatus', 'status'], None),
-                    "vo2_max": get_val_multi(max_metrics, ['vo2MaxValue', 'generic', 'vo2Max'], 0),
-                    "fitness_age": get_val_multi(max_metrics, ['fitnessAge', 'age'], 0),
-                    "vo2_max_running": get_val_multi(max_metrics, ['vo2MaxRunningValue', 'running'], 0),
-                    "vo2_max_cycling": get_val_multi(max_metrics, ['vo2MaxCyclingValue', 'cycling'], 0),
+                    "readiness_feedback_short": readiness_feedback_short,
+                    "readiness_feedback_long": readiness_feedback_long,
+                    "readiness_sleep_score": readiness_sleep_score,
+                    "readiness_recovery_time_hours": round(readiness_recovery_time / 3600, 2) if readiness_recovery_time else 0,
+                    "readiness_hrv_weekly_avg": readiness_hrv_weekly,
+                    "training_status": get_val(training_status, 'trainingStatus', None),
+                    "vo2_max": get_val(max_metrics, 'vo2MaxValue', 0),
+                    "fitness_age": get_val(max_metrics, 'fitnessAge', 0),
                 },
                 "activities": {
                     "count": len(activities) if isinstance(activities, list) else 0,
@@ -321,7 +344,7 @@ class handler(BaseHTTPRequestHandler):
                 },
                 "hydration": {
                     "total_ml": hydration_total,
-                    "goal_ml": get_val_multi(hydration, ['goalInML', 'goal'], 0),
+                    "goal_ml": hydration_goal,
                     "sweat_loss_ml": hydration_sweat,
                 },
                 "blood_pressure": {

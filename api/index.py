@@ -9,27 +9,20 @@ import traceback
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
-            # Récupérer paramètres URL
             parsed_url = urlparse(self.path)
             params = parse_qs(parsed_url.query)
             
-            # VÉRIFIER MODE DEBUG EN PREMIER
+            # MODE DEBUG
             if 'debug' in params:
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
-                debug_response = {
-                    "DEBUG_MODE": True,
-                    "message": "Mode debug activé - récupération des données brutes...",
-                    "params_received": str(params)
-                }
-                self.wfile.write(json.dumps(debug_response, indent=2).encode())
                 
-                # Maintenant récupérer les vraies données
                 email = os.environ.get('GARMIN_EMAIL')
                 password = os.environ.get('GARMIN_PASSWORD')
                 
                 if not email or not password:
+                    self.wfile.write(json.dumps({"error": "Credentials missing"}).encode())
                     return
                 
                 date_str = params['date'][0] if 'date' in params and params['date'][0] else datetime.now().strftime("%Y-%m-%d")
@@ -38,37 +31,42 @@ class handler(BaseHTTPRequestHandler):
                     client = Garmin(email, password)
                     client.login()
                     
+                    # Récupérer toutes les données brutes
+                    stats = client.get_stats(date_str)
                     sleep_data = client.get_sleep_data(date_str)
                     hrv = client.get_hrv_data(date_str)
+                    spo2 = client.get_spo2_data(date_str)
+                    training_readiness = client.get_training_readiness(date_str)
+                    max_metrics = client.get_max_metrics(date_str)
                     
-                    debug_full = {
+                    debug_response = {
                         "DEBUG_MODE": True,
                         "date": date_str,
-                        "sleep_data_type": str(type(sleep_data)),
-                        "sleep_data_keys": list(sleep_data.keys()) if isinstance(sleep_data, dict) else "not_dict",
-                        "sleep_data_sample": str(sleep_data)[:2000],
-                        "hrv_type": str(type(hrv)),
-                        "hrv_keys": list(hrv.keys()) if isinstance(hrv, dict) else "not_dict",
-                        "hrv_sample": str(hrv)[:2000],
+                        "stats_keys": list(stats.keys()) if isinstance(stats, dict) else None,
+                        "stats_sample": {k: stats.get(k) for k in ['averageHeartRateInBeatsPerMinute', 'avgHeartRate', 'averageHR'] if k in stats} if isinstance(stats, dict) else None,
+                        "sleep_keys": list(sleep_data.keys()) if isinstance(sleep_data, dict) else None,
+                        "daily_sleep_keys": list(sleep_data.get('dailySleepDTO', {}).keys()) if isinstance(sleep_data, dict) else None,
+                        "hrv_keys": list(hrv.keys()) if isinstance(hrv, dict) else None,
+                        "hrv_full": hrv,
+                        "spo2_keys": list(spo2.keys()) if isinstance(spo2, dict) else None,
+                        "spo2_full": spo2,
+                        "training_readiness_keys": list(training_readiness.keys()) if isinstance(training_readiness, dict) else None,
+                        "training_readiness_full": training_readiness,
+                        "max_metrics_keys": list(max_metrics.keys()) if isinstance(max_metrics, dict) else None,
+                        "max_metrics_full": max_metrics,
                     }
                     
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps(debug_full, indent=2).encode())
+                    self.wfile.write(json.dumps(debug_response, indent=2).encode())
                 except Exception as e:
                     error_debug = {
                         "DEBUG_MODE": True,
                         "error": str(e),
                         "traceback": traceback.format_exc()
                     }
-                    self.send_response(500)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
                     self.wfile.write(json.dumps(error_debug, indent=2).encode())
                 return
             
-            # MODE NORMAL (sans debug)
+            # MODE NORMAL
             email = os.environ.get('GARMIN_EMAIL')
             password = os.environ.get('GARMIN_PASSWORD')
             
@@ -76,29 +74,25 @@ class handler(BaseHTTPRequestHandler):
                 self.send_response(400)
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
-                response = {"error": "Identifiants non configurés"}
-                self.wfile.write(json.dumps(response).encode())
+                self.wfile.write(json.dumps({"error": "Identifiants non configurés"}).encode())
                 return
             
-            if 'date' in params and params['date'][0]:
-                date_str = params['date'][0]
-                try:
-                    datetime.strptime(date_str, "%Y-%m-%d")
-                except ValueError:
-                    self.send_response(400)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    response = {"error": "Format invalide. Utilisez YYYY-MM-DD"}
-                    self.wfile.write(json.dumps(response).encode())
-                    return
-            else:
-                date_str = datetime.now().strftime("%Y-%m-%d")
+            date_str = params['date'][0] if 'date' in params and params['date'][0] else datetime.now().strftime("%Y-%m-%d")
             
-            # Connexion Garmin
+            try:
+                datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                self.send_response(400)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Format invalide. Utilisez YYYY-MM-DD"}).encode())
+                return
+            
+            # Connexion
             client = Garmin(email, password)
             client.login()
             
-            # Fonction conversion temps
+            # Fonctions helpers
             def sec_to_time(seconds):
                 if not seconds or seconds == 0:
                     return "0h00"
@@ -109,18 +103,34 @@ class handler(BaseHTTPRequestHandler):
             def safe_get(method_name, *args):
                 try:
                     if hasattr(client, method_name):
-                        method = getattr(client, method_name)
-                        result = method(*args)
-                        if result is None:
-                            return [] if 'activit' in method_name or 'pressure' in method_name else {}
-                        return result
-                    return [] if 'activit' in method_name or 'pressure' in method_name else {}
+                        result = getattr(client, method_name)(*args)
+                        return result if result is not None else ({} if 'activit' not in method_name else [])
+                    return {} if 'activit' not in method_name else []
                 except:
-                    return [] if 'activit' in method_name or 'pressure' in method_name else {}
+                    return {} if 'activit' not in method_name else []
+            
+            # Fonction pour chercher dans plusieurs clés possibles
+            def get_val_multi(data, keys, default=0):
+                """Cherche la valeur dans plusieurs clés possibles"""
+                if not data or not isinstance(data, dict):
+                    return default
+                
+                if isinstance(keys, str):
+                    keys = [keys]
+                
+                for key in keys:
+                    if key in data and data[key] is not None:
+                        value = data[key]
+                        # Ne retourner 0 que si c'est vraiment 0, pas None
+                        if value != 0 or (value == 0 and default != 0):
+                            return value
+                
+                return default
             
             def get_val(data, key, default=0):
                 if data and isinstance(data, dict):
-                    return data.get(key, default)
+                    val = data.get(key)
+                    return val if val is not None else default
                 return default
             
             # Récupération données
@@ -141,22 +151,25 @@ class handler(BaseHTTPRequestHandler):
             blood_pressure = safe_get('get_blood_pressure', date_str, date_str)
             
             # Extraction sommeil
-            daily_sleep = {}
-            sleep_levels = []
-            sleep_movement = []
-            if isinstance(sleep_data, dict):
-                daily_sleep = sleep_data.get('dailySleepDTO', {})
-                sleep_levels = sleep_data.get('sleepLevels', [])
-                sleep_movement = sleep_data.get('sleepMovement', [])
+            daily_sleep = sleep_data.get('dailySleepDTO', {}) if isinstance(sleep_data, dict) else {}
+            sleep_levels = sleep_data.get('sleepLevels', []) if isinstance(sleep_data, dict) else []
+            sleep_movement = sleep_data.get('sleepMovement', []) if isinstance(sleep_data, dict) else []
             
-            # Extraction HRV
-            hrv_status = None
-            hrv_avg = 0
-            hrv_last_night = 0
-            if isinstance(hrv, dict):
-                hrv_status = hrv.get('status') or hrv.get('hrvStatus')
-                hrv_avg = hrv.get('lastNightAvg', 0) or hrv.get('weeklyAvg', 0)
-                hrv_last_night = hrv.get('lastNightAvg', 0)
+            # Extraction HRV avec clés multiples
+            hrv_status = get_val_multi(hrv, ['status', 'hrvStatus'], None)
+            hrv_avg = get_val_multi(hrv, ['lastNightAvg', 'weeklyAvg', 'lastSevenDaysAvg'], 0)
+            hrv_last_night = get_val_multi(hrv, ['lastNightAvg', 'value'], 0)
+            hrv_baseline_low = get_val_multi(hrv, ['baselineLowUpper', 'baselineLow'], 0)
+            hrv_baseline_balanced = get_val_multi(hrv, ['baselineBalancedLow', 'baselineBalanced'], 0)
+            hrv_last_night_5min = get_val_multi(hrv, ['lastNight5MinHigh', 'fiveMinuteHigh'], 0)
+            
+            # Extraction SPO2 avec clés multiples
+            spo2_avg = get_val_multi(spo2, ['averageSpo2Value', 'avgSpO2', 'averageSpO2', 'calendarDate'], 0)
+            spo2_lowest = get_val_multi(spo2, ['lowestSpo2Value', 'lowestSpO2', 'minSpO2'], 0)
+            
+            # Extraction training avec clés multiples
+            readiness_score = get_val_multi(training_readiness, ['score', 'trainingReadinessScore', 'readiness'], 0)
+            readiness_level = get_val_multi(training_readiness, ['level', 'readinessLevel'], None)
             
             # Durées sommeil
             sleep_total_sec = get_val(daily_sleep, "sleepTimeSeconds", 0)
@@ -166,6 +179,17 @@ class handler(BaseHTTPRequestHandler):
             sleep_awake_sec = get_val(daily_sleep, "awakeSleepSeconds", 0)
             sleep_unmeas_sec = get_val(daily_sleep, "unmeasurableSleepSeconds", 0)
             sleep_nap_sec = get_val(daily_sleep, "napTimeSeconds", 0)
+            
+            # FC moyenne : chercher dans les activités si pas dans stats
+            avg_hr = get_val_multi(stats, ['averageHeartRateInBeatsPerMinute', 'avgHeartRate', 'averageHR'], 0)
+            if avg_hr == 0 and isinstance(activities, list) and len(activities) > 0:
+                # Calculer la moyenne des FC des activités
+                hr_values = [act.get('averageHR', 0) for act in activities if act.get('averageHR', 0) > 0]
+                avg_hr = round(sum(hr_values) / len(hr_values)) if hr_values else 0
+            
+            # Hydration avec clés multiples
+            hydration_total = get_val_multi(hydration, ['valueInML', 'value', 'totalHydration'], None)
+            hydration_sweat = get_val_multi(hydration, ['sweatLossInML', 'sweatLoss', 'estimatedSweatLoss'], None)
             
             # Réponse complète
             data = {
@@ -185,16 +209,16 @@ class handler(BaseHTTPRequestHandler):
                     "steps_goal": get_val(stats, "dailyStepGoal", 0),
                 },
                 "heart_rate": {
-                    "avg": get_val(stats, "averageHeartRateInBeatsPerMinute", 0),
+                    "avg": avg_hr,
                     "resting": get_val(stats, "restingHeartRate", 0),
                     "max": get_val(stats, "maxHeartRate", 0),
                     "min": get_val(stats, "minHeartRate", 0),
                     "hrv_avg": hrv_avg,
                     "hrv_status": hrv_status,
-                    "hrv_baseline_low": get_val(hrv, "baselineLowUpper", 0),
-                    "hrv_baseline_balanced": get_val(hrv, "baselineBalancedLow", 0),
+                    "hrv_baseline_low": hrv_baseline_low,
+                    "hrv_baseline_balanced": hrv_baseline_balanced,
                     "hrv_last_night": hrv_last_night,
-                    "hrv_last_night_5min": get_val(hrv, "lastNight5MinHigh", 0),
+                    "hrv_last_night_5min": hrv_last_night_5min,
                 },
                 "sleep": {
                     "total_hours": round(sleep_total_sec / 3600, 2),
@@ -211,24 +235,24 @@ class handler(BaseHTTPRequestHandler):
                     "unmeasurable_formatted": sec_to_time(sleep_unmeas_sec),
                     "nap_time_hours": round(sleep_nap_sec / 3600, 2),
                     "nap_formatted": sec_to_time(sleep_nap_sec),
-                    "sleep_score": get_val(daily_sleep, "overallSleepScore", 0),
+                    "sleep_score": get_val_multi(daily_sleep, ['overallSleepScore', 'sleepScore', 'score'], 0),
                     "sleep_score_feedback": get_val(daily_sleep, "sleepScoreFeedback", None),
                     "sleep_score_insight": get_val(daily_sleep, "sleepScoreInsight", None),
-                    "sleep_score_quality": 0,
-                    "sleep_score_recovery": 0,
-                    "sleep_score_duration": 0,
+                    "sleep_score_quality": get_val_multi(daily_sleep, ['sleepScoreQuality', 'qualityScore'], 0),
+                    "sleep_score_recovery": get_val_multi(daily_sleep, ['sleepScoreRecovery', 'recoveryScore'], 0),
+                    "sleep_score_duration": get_val_multi(daily_sleep, ['sleepScoreDuration', 'durationScore'], 0),
                     "sleep_quality": get_val(daily_sleep, "sleepQualityTypeName", None),
                     "awake_count": get_val(daily_sleep, "awakeCount", 0),
                     "avg_sleep_stress": get_val(daily_sleep, "avgSleepStress", 0),
                     "sleep_start": get_val(daily_sleep, "sleepStartTimestampLocal", None),
                     "sleep_end": get_val(daily_sleep, "sleepEndTimestampLocal", None),
                     "sleep_window_confirmed": get_val(daily_sleep, "sleepWindowConfirmed", False),
-                    "avg_respiration": get_val(daily_sleep, "avgSleepRespiration", 0),
-                    "lowest_respiration": get_val(daily_sleep, "lowestRespiration", 0),
-                    "highest_respiration": get_val(daily_sleep, "highestRespiration", 0),
-                    "avg_spo2_sleep": get_val(daily_sleep, "avgOxygenSaturation", 0),
-                    "sleep_levels_count": len(sleep_levels) if sleep_levels else 0,
-                    "sleep_movements_count": len(sleep_movement) if sleep_movement else 0,
+                    "avg_respiration": get_val_multi(daily_sleep, ['avgSleepRespiration', 'avgRespiration', 'averageRespiration'], 0),
+                    "lowest_respiration": get_val_multi(daily_sleep, ['lowestRespiration', 'minRespiration'], 0),
+                    "highest_respiration": get_val_multi(daily_sleep, ['highestRespiration', 'maxRespiration'], 0),
+                    "avg_spo2_sleep": get_val_multi(daily_sleep, ['avgOxygenSaturation', 'avgSpO2', 'averageSpO2'], 0),
+                    "sleep_levels_count": len(sleep_levels),
+                    "sleep_movements_count": len(sleep_movement),
                 },
                 "body_battery": {
                     "charged": get_val(stats, "bodyBatteryChargedValue", 0),
@@ -247,22 +271,22 @@ class handler(BaseHTTPRequestHandler):
                     "high_time_minutes": get_val(stress_data, "highStressMinutes", 0),
                 },
                 "respiration": {
-                    "avg_waking": get_val(respiration, "avgWakingRespirationValue", 0),
-                    "highest": get_val(respiration, "highestRespirationValue", 0),
-                    "lowest": get_val(respiration, "lowestRespirationValue", 0),
+                    "avg_waking": get_val_multi(respiration, ['avgWakingRespirationValue', 'averageWakingRespiration', 'avgRespiration'], 0),
+                    "highest": get_val_multi(respiration, ['highestRespirationValue', 'maxRespiration'], 0),
+                    "lowest": get_val_multi(respiration, ['lowestRespirationValue', 'minRespiration'], 0),
                 },
                 "spo2": {
-                    "avg": get_val(spo2, "averageSpo2Value", 0),
-                    "lowest": get_val(spo2, "lowestSpo2Value", 0),
+                    "avg": spo2_avg,
+                    "lowest": spo2_lowest,
                 },
                 "training": {
-                    "readiness_score": get_val(training_readiness, "score", 0),
-                    "readiness_level": get_val(training_readiness, "level", None),
-                    "training_status": get_val(training_status, "trainingStatus", None),
-                    "vo2_max": get_val(max_metrics, "vo2MaxValue", 0),
-                    "fitness_age": get_val(max_metrics, "fitnessAge", 0),
-                    "vo2_max_running": get_val(max_metrics, "vo2MaxRunningValue", 0),
-                    "vo2_max_cycling": get_val(max_metrics, "vo2MaxCyclingValue", 0),
+                    "readiness_score": readiness_score,
+                    "readiness_level": readiness_level,
+                    "training_status": get_val_multi(training_status, ['trainingStatus', 'status'], None),
+                    "vo2_max": get_val_multi(max_metrics, ['vo2MaxValue', 'generic', 'vo2Max'], 0),
+                    "fitness_age": get_val_multi(max_metrics, ['fitnessAge', 'age'], 0),
+                    "vo2_max_running": get_val_multi(max_metrics, ['vo2MaxRunningValue', 'running'], 0),
+                    "vo2_max_cycling": get_val_multi(max_metrics, ['vo2MaxCyclingValue', 'cycling'], 0),
                 },
                 "activities": {
                     "count": len(activities) if isinstance(activities, list) else 0,
@@ -286,7 +310,7 @@ class handler(BaseHTTPRequestHandler):
                     ]
                 },
                 "body_composition": {
-                    "weight_kg": get_val(weight, "weight", 0) / 1000 if get_val(weight, "weight", 0) > 0 else 0,
+                    "weight_kg": round(get_val(weight, "weight", 0) / 1000, 2) if get_val(weight, "weight", 0) > 0 else 0,
                     "bmi": get_val(body_comp, "bmi", 0),
                     "body_fat_percentage": get_val(body_comp, "bodyFat", 0),
                     "body_water_percentage": get_val(body_comp, "bodyWater", 0),
@@ -296,9 +320,9 @@ class handler(BaseHTTPRequestHandler):
                     "visceral_fat": get_val(body_comp, "visceralFat", 0),
                 },
                 "hydration": {
-                    "total_ml": get_val(hydration, "valueInML", None),
-                    "goal_ml": get_val(hydration, "goalInML", 0),
-                    "sweat_loss_ml": get_val(hydration, "sweatLossInML", None),
+                    "total_ml": hydration_total,
+                    "goal_ml": get_val_multi(hydration, ['goalInML', 'goal'], 0),
+                    "sweat_loss_ml": hydration_sweat,
                 },
                 "blood_pressure": {
                     "systolic": (
